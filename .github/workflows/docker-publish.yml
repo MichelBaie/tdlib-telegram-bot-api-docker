@@ -49,9 +49,7 @@ jobs:
           context: .
           file: ./Dockerfile
           push: true
-          # On spécifie ici un tag unique et statique : 'latest'
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          tags: "MichelBaie/tdlib-telegram-bot-api-docker:latest"
           platforms: linux/amd64
-          # Le cache est conservé pour accélérer les builds futurs
           cache-from: type=gha
           cache-to: type=gha,mode=max
