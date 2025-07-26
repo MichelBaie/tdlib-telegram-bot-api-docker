@@ -1,32 +1,29 @@
-name: Build and Push Docker Image (AMD64)
+name: Build and Push 'latest' Docker Image (AMD64)
 
 on:
   # Permet de lancer ce workflow manuellement depuis l'onglet Actions
   workflow_dispatch:
 
-  # Déclenche le workflow à chaque push sur la branche main ou sur un tag (ex: v1.2.3)
+  # Déclenche le workflow à chaque push sur la branche main
   push:
     branches:
       - 'main'
-    tags:
-      - 'v*.*.*'
-
-  # Exécute le build toutes les semaines pour maintenir l'image à jour
+  
+  # Exécute le build toutes les semaines pour intégrer les mises à jour de la base
   schedule:
     - cron: "0 2 */7 * *"
 
-# Variables d'environnement globales pour le workflow
+# Variables d'environnement pour la clarté
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
+  IMAGE_NAME: ${{ github.repository }} # ex: MichelBaie/tdlib-telegram-bot-api-docker
 
 jobs:
-  build-and-push:
-    name: Build and Push AMD64 Image
-    # Utilise un runner standard fourni par GitHub (qui est amd64)
+  build-and-push-latest:
+    name: Build and Push 'latest'
     runs-on: ubuntu-latest
-
-    # Permissions nécessaires pour que le GITHUB_TOKEN puisse lire le code et écrire sur GHCR
+    
+    # Permissions pour que le workflow puisse écrire sur le GitHub Container Registry
     permissions:
       contents: read
       packages: write
@@ -42,37 +39,19 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata for Docker
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          tags: |
-            # Tag 'nightly' pour les exécutions programmées (cron)
-            type=schedule,pattern=nightly
-            # Tag avec le nom de la branche pour les pushs sur une branche (ex: main)
-            type=ref,event=branch
-            # Tag avec le nom du tag Git pour les pushs de tags (ex: v1.2.3)
-            type=ref,event=tag
-            # Tag avec le SHA court du commit
-            type=sha
-            # Tag 'latest' si le push est sur la branche par défaut (main)
-            latest=auto
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
       - name: Build and push Docker image
+        id: build-and-push
         uses: docker/build-push-action@v5
         with:
           context: .
           file: ./Dockerfile
-          # Cible explicitement la plateforme linux/amd64
-          platforms: linux/amd64
           push: true
-          # Pousse l'image avec tous les tags générés à l'étape précédente
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          # Active le cache pour accélérer les futurs builds
+          # On spécifie ici un tag unique et statique : 'latest'
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          platforms: linux/amd64
+          # Le cache est conservé pour accélérer les builds futurs
           cache-from: type=gha
           cache-to: type=gha,mode=max
