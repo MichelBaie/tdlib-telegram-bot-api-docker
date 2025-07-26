@@ -10,18 +10,14 @@ on:
 
 env:
   REGISTRY: ghcr.io
+  # On garde le nom de l'image avec sa casse d'origine ici
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  # =======================================================================
-  # JOB 1: Construit une image pour chaque architecture (amd64 et arm64)
-  # sur des runners natifs.
-  # =======================================================================
   build-per-arch:
     name: Build on ${{ matrix.arch }}
     runs-on: ${{ matrix.runner }}
     strategy:
-      # Exécute tous les jobs de la matrice même si l'un d'eux échoue
       fail-fast: false
       matrix:
         include:
@@ -30,8 +26,6 @@ jobs:
             runner: ubuntu-latest
           - arch: arm64
             platform: linux/arm64
-            # Ce runner est disponible pour les comptes publics sur des projets open-source,
-            # et pour les comptes Pro/Team/Enterprise.
             runner: ubuntu-latest-arm64
 
     permissions:
@@ -41,6 +35,19 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      # NOUVELLE ÉTAPE : Génère les tags et labels en minuscules
+      - name: Generate Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          # Spécifie le nom de l'image. L'action se chargera de le mettre en minuscules.
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          # On crée un tag qui se termine par '-<architecture>'
+          # ex: 'latest-amd64'
+          flavor: |
+            suffix=-${{ matrix.arch }}
+            latest=false
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -59,19 +66,14 @@ jobs:
           file: ./Dockerfile
           platforms: ${{ matrix.platform }}
           push: true
-          # Pousse avec un tag unique par architecture, ex: ghcr.io/user/repo:latest-amd64
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest-${{ matrix.arch }}
-          # Le cache est partagé entre les workflows pour accélérer les builds
+          # On utilise les tags générés par l'étape 'meta', qui sont garantis en minuscules
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  # =======================================================================
-  # JOB 2: Crée et pousse le manifest 'latest' qui pointe vers les
-  # images amd64 et arm64 construites précédemment.
-  # =======================================================================
   publish-manifest:
     name: Publish 'latest' manifest
-    # S'exécute seulement après que tous les jobs 'build-per-arch' ont réussi
     needs: build-per-arch
     runs-on: ubuntu-latest
 
@@ -86,10 +88,16 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # ÉTAPE MODIFIÉE : Crée le manifest en utilisant un nom d'image en minuscules
       - name: Create and push 'latest' manifest
         run: |
-          docker manifest create ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
-            --amend ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest-amd64 \
-            --amend ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest-arm64
-          docker manifest push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          # On convertit le nom de l'image en minuscules avant de l'utiliser
+          LOWERCASE_IMAGE_NAME=$(echo "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}" | tr '[:upper:]' '[:lower:]')
+          
+          echo "Creating manifest for ${LOWERCASE_IMAGE_NAME}:latest..."
 
+          docker manifest create ${LOWERCASE_IMAGE_NAME}:latest \
+            --amend ${LOWERCASE_IMAGE_NAME}:latest-amd64 \
+            --amend ${LOWERCASE_IMAGE_NAME}:latest-arm64
+            
+          docker manifest push ${LOWERCASE_IMAGE_NAME}:latest
