@@ -1,7 +1,7 @@
-FROM ubuntu:24.04 AS buildBase
+FROM ubuntu:24.04 AS buildbase
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
+    apt-get install -y \
     build-essential \
     git \
     zlib1g-dev \
@@ -17,12 +17,12 @@ RUN cd build && cmake --build . --target install -- -j$(nproc)
 FROM ubuntu:24.04
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
+    apt-get install -y \
     libssl3 \
     zlib1g \
     libstdc++6 \
     && rm -rf /var/lib/apt/lists/*
-COPY --from=buildBase /usr/src/app/build/telegram-bot-api /usr/local/bin/telegram-bot-api
+COPY --from=buildbase /usr/src/app/build/telegram-bot-api /usr/local/bin/telegram-bot-api
 RUN mkdir /data
 VOLUME /data
 ENTRYPOINT ["telegram-bot-api", "--local", "--dir=/data"]
