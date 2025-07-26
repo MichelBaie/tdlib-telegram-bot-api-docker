@@ -1,29 +1,39 @@
-name: Build and Push 'latest' Docker Image (AMD64)
+name: Build and Push Multi-Arch Docker Image
 
 on:
-  # Permet de lancer ce workflow manuellement depuis l'onglet Actions
   workflow_dispatch:
-
-  # Déclenche le workflow à chaque push sur la branche main
   push:
     branches:
       - 'main'
-  
-  # Exécute le build toutes les semaines pour intégrer les mises à jour de la base
   schedule:
     - cron: "0 2 */7 * *"
 
-# Variables d'environnement pour la clarté
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }} # ex: MichelBaie/tdlib-telegram-bot-api-docker
+  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  build-and-push-latest:
-    name: Build and Push 'latest'
-    runs-on: ubuntu-latest
-    
-    # Permissions pour que le workflow puisse écrire sur le GitHub Container Registry
+  # =======================================================================
+  # JOB 1: Construit une image pour chaque architecture (amd64 et arm64)
+  # sur des runners natifs.
+  # =======================================================================
+  build-per-arch:
+    name: Build on ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      # Exécute tous les jobs de la matrice même si l'un d'eux échoue
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            platform: linux/amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            platform: linux/arm64
+            # Ce runner est disponible pour les comptes publics sur des projets open-source,
+            # et pour les comptes Pro/Team/Enterprise.
+            runner: ubuntu-latest-arm64
+
     permissions:
       contents: read
       packages: write
@@ -32,6 +42,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Log in to the GitHub Container Registry
         uses: docker/login-action@v3
         with:
@@ -39,17 +52,44 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build and push Docker image
-        id: build-and-push
+      - name: Build and push arch-specific image
         uses: docker/build-push-action@v5
         with:
           context: .
           file: ./Dockerfile
+          platforms: ${{ matrix.platform }}
           push: true
-          tags: "MichelBaie/tdlib-telegram-bot-api-docker:latest"
-          platforms: linux/amd64
+          # Pousse avec un tag unique par architecture, ex: ghcr.io/user/repo:latest-amd64
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest-${{ matrix.arch }}
+          # Le cache est partagé entre les workflows pour accélérer les builds
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # =======================================================================
+  # JOB 2: Crée et pousse le manifest 'latest' qui pointe vers les
+  # images amd64 et arm64 construites précédemment.
+  # =======================================================================
+  publish-manifest:
+    name: Publish 'latest' manifest
+    # S'exécute seulement après que tous les jobs 'build-per-arch' ont réussi
+    needs: build-per-arch
+    runs-on: ubuntu-latest
+
+    permissions:
+      packages: write
+
+    steps:
+      - name: Log in to the GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create and push 'latest' manifest
+        run: |
+          docker manifest create ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
+            --amend ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest-amd64 \
+            --amend ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest-arm64
+          docker manifest push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+
